@@ -1,0 +1,5 @@
+.DS_Store
+cs-server/target/
+cs-web/dist/
+cs-web/node_modules/
+.m2repo/

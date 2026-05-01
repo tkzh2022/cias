@@ -1,57 +1,53 @@
-# 智能客服系统（高并发 / 低延迟）
+# 智能客服系统
 
-这是一个面向企业场景的智能客服工程化落地项目，目标是将 AI 能力从“可演示”推进到“可运行、可扩展、可验证”。
+企业场景下的智能客服示例工程，覆盖从问答链路到基础工程能力的最小可运行闭环。当前版本已实现前后端联调、RAG 检索增强、模型路由、转人工兜底、限流与缓存，并保留向生产能力演进的扩展点。
 
-项目围绕以下核心诉求设计：
-- 高并发：在服务层做限流、缓存与异步解耦，提升吞吐能力
-- 低延迟：优先命中缓存，模型调用链路支持熔断/重试/降级
-- AI 应用：RAG 检索增强 + 多模型路由 + 转人工兜底
+## 功能概览
 
-## 目录结构
+### 已实现
+- 问答接口：`/api/chat` 与 `/api/chat/stream`
+- 主链路编排：限流 -> 语义缓存 -> RAG 检索 -> 模型路由 -> 生成回答 -> 异步事件
+- 风险兜底：低置信度/敏感问题转人工
+- 模型调用可靠性：Resilience4j 熔断 + 重试 + 回退
+- 前端对话页面：会话消息、失败重试、知识来源展示
 
-```text
-.
-├── cs-server/      # Java Spring Boot 后端服务
-├── cs-web/         # React + Vite 前端对话页面
-├── docs/           # 架构、调研、测试文档
-├── tests/          # 压测脚本（k6）
-└── tools/          # 本地工具（如便携 Maven）
-```
-
-## 核心能力
-
-### 1) 智能问答主链路
-- `ChatController`：提供 `/api/chat` 与 `/api/chat/stream`
-- `ChatService`：编排限流、缓存、RAG、模型调用、事件发布
-- `RagOrchestrator`：混合检索与 Prompt 组织
-- `ModelRouter`：按问题复杂度与置信度选择模型层级
-- `HumanHandoffService`：低置信度/敏感问题转人工
-
-### 2) 高并发低延迟策略
-- `ChatRateLimiter`：用户维度限流，保护核心链路
-- `SemanticCacheService`：热点问题缓存，减少重复 LLM 调用
-- `resilience4j`：模型调用侧熔断与重试
-- `KafkaProducer`：异步事件投递，解耦非实时处理
-
-### 3) 工程质量与可维护性
-- 参数校验：`jakarta.validation`
-- 全局异常处理：统一错误码 + 告警日志
-- 分层清晰：便于替换真实向量库、模型网关与监控体系
+### 可演进方向
+- 对接真实向量库与召回排序链路
+- 对接真实模型网关并统一响应解析
+- 将会话与语义缓存迁移到 Redis 等外部存储
+- 增加观测指标（缓存命中率、路由命中率、模型成本）
 
 ## 技术栈
 
-- 后端：Java 21、Spring Boot 3、Redis、Kafka、Resilience4j
-- 前端：React 18、TypeScript、Vite
-- 测试与验证：JUnit、MockMvc、k6
+- 后端：Java 21、Spring Boot 3.3、Spring Web、Validation、Actuator、Kafka、Redis Starter、Resilience4j
+- 前端：React 18、TypeScript 5、Vite 5
+- 测试与验证：JUnit 5、MockMvc、k6
+
+## 项目结构
+
+```text
+.
+├── cs-server/                # 后端服务（Spring Boot）
+│   └── src/main/java/com/company/cs/
+│       ├── api/              # Controller、DTO、全局异常
+│       ├── service/          # Chat 主链路、RAG、模型路由、LLM 网关
+│       ├── infra/            # cache/queue/ratelimit/retrieval/monitoring
+│       └── domain/           # 领域对象
+├── cs-web/                   # 前端应用（React + Vite）
+├── docs/                     # 架构、调研、测试报告
+└── tests/k6/                 # 压测脚本
+```
 
 ## 快速启动
 
-## 先决条件
+### 1) 环境要求
 - JDK 21
+- Maven 3.9+
 - Node.js 18+
-- Maven 3.9+（或项目内 `tools/apache-maven-3.9.6`）
 
-## 后端
+说明：当前仓库未包含 `tools/apache-maven-3.9.6`，默认使用本机安装的 Maven。
+
+### 2) 启动后端
 
 ```bash
 cd cs-server
@@ -59,43 +55,118 @@ mvn test
 mvn spring-boot:run
 ```
 
-如果本机没有全局 Maven，可在项目根目录使用便携 Maven：
+默认端口 `8080`。
 
-```bash
-export JAVA_HOME="/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home"
-export PATH="$JAVA_HOME/bin:$PATH"
-./tools/apache-maven-3.9.6/bin/mvn -Dmaven.repo.local="$(pwd)/.m2repo" -f cs-server/pom.xml test
-```
-
-## 前端
+### 3) 启动前端
 
 ```bash
 cd cs-web
 npm install
-npm run build
 npm run dev
 ```
 
-## 压测
+默认端口 `5173`，并通过 Vite 代理将 `/api` 转发到 `http://localhost:8080`。
+
+### 4) 最小联调验证
+
+浏览器打开 `http://localhost:5173`，发送任意问题，或直接使用 curl：
+
+```bash
+curl -X POST "http://localhost:8080/api/chat" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessionId":"demo-session-1",
+    "userId":"demo-user",
+    "message":"请问退款流程是什么？",
+    "channel":"web"
+  }'
+```
+
+## 配置说明
+
+后端配置文件：`cs-server/src/main/resources/application.yml`
+
+### Spring 通用配置
+- `server.port`：服务端口，默认 `8080`
+- `spring.data.redis.host/port`：Redis 连接参数，默认 `localhost:6379`
+- `spring.kafka.bootstrap-servers`：Kafka 地址，默认 `localhost:9092`
+
+### 业务配置（`app.*`）
+- `app.kafka.enabled`：是否启用 Kafka 发送，默认 `false`
+- `app.kafka.topic`：Kafka topic，默认 `cs-chat-events`
+- `app.llm.cloud-enabled`：是否启用云端 LLM 调用，默认 `false`
+- `app.llm.api-url` / `app.llm.api-key`：云端 LLM 地址与鉴权
+- `app.llm.fast-model` / `app.llm.strong-model`：路由模型名
+- `app.rate-limit.requests-per-window` / `app.rate-limit.window-seconds`：限流窗口配置
+
+## API 简述
+
+### `POST /api/chat`
+请求体：
+
+```json
+{
+  "sessionId": "string",
+  "userId": "string",
+  "message": "string, max 2000",
+  "channel": "string"
+}
+```
+
+响应体（示例字段）：
+
+```json
+{
+  "requestId": "uuid",
+  "sessionId": "string",
+  "answer": "string",
+  "route": "FAST | STRONG | HANDOFF",
+  "handoff": false,
+  "sources": []
+}
+```
+
+### `POST /api/chat/stream`
+- 返回 `text/event-stream`
+- 事件类型：`meta`、`chunk`、`done`
+
+## 测试与压测
+
+### 后端测试
+
+```bash
+cd cs-server
+mvn test
+```
+
+### 前端构建验证
+
+```bash
+cd cs-web
+npm run build
+```
+
+### k6 压测
 
 ```bash
 k6 run tests/k6/chat-load-test.js
 ```
 
-## 本地验证记录（示例）
+压测脚本目标地址为 `http://localhost:8080/api/chat`，阈值：
+- `http_req_failed < 1%`
+- `http_req_duration p95 < 800ms`
 
-- 后端测试：核心单测 + 控制器集成测试通过
-- 前端构建：TypeScript + Vite 打包通过
-- 并发模拟（一次本地样例）：120 请求 / 并发 20，成功率 100%，P95 约 150ms
+## 已知限制与风险
 
-注：最终性能请以目标环境（真实模型 API、真实 Redis/Kafka、目标网络）复测结果为准。
+- 当前 LLM 默认走 mock：`app.llm.cloud-enabled=false` 或未配置 `api-url` 时，不会调用真实云模型。
+- 前端当前请求的是 `/api/chat`；页面里的“流式展示”是前端逐字渲染效果，不是后端 SSE 真流式消费。
+- `/api/chat/stream` 为服务端将完整答案拆分后再推送 `chunk`，并非 token 级实时生成。
+- `SemanticCacheService` 与 `SessionStore` 当前为进程内内存实现，不具备多实例共享能力。
+- `app.redis.enabled` 当前未被业务代码消费；引入了 Redis starter 与 `StringRedisTemplate` 配置，但缓存与会话仍未落 Redis。
+- 无 OpenAPI/Swagger 文档，接口请以 `ChatController` 与 DTO 定义为准。
 
 ## 文档索引
 
 - 架构说明：`docs/architecture.md`
-- 市场调研：`docs/market-research.md`
 - 测试报告：`docs/test-report.md`
-
-## 可直接用于填表的“成果描述”示例
-
-我基于 Agent 驱动从 0 到 1 落地了一套智能客服系统，核心解决了传统客服知识更新慢、复杂问题处理不稳定、并发上来后延迟抖动明显这三个痛点。技术上采用了“RAG 检索增强 + 多模型路由 + 转人工兜底”的主链路，并在工程层加入限流、语义缓存、异步事件、熔断重试，形成可降级的高并发低延迟架构。项目已完成后端服务、前端对话页、自动化测试与压测脚本，能够支撑多轮问答与来源引用，且在本地模拟压测中达到稳定低延迟和 100% 请求成功率，具备继续接入真实知识库与生产模型网关的落地基础。
+- 市场调研：`docs/market-research.md`
